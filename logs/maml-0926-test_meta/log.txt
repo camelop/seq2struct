@@ -1,2 +1,0 @@
-[2019-09-26T16:05:32] Logging to ./logs/maml-0926-test_meta
-[2019-09-26T16:05:32] {'to_do': 'TODO HERE'}
