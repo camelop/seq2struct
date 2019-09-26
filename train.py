@@ -46,6 +46,9 @@ class TrainConfig:
     # Seed for RNG used in computing the model's training loss.
     # Only relevant with internal randomness in the model, e.g. with dropout.
     model_seed = attr.ib(default=None)
+    
+    # if this is on, load a separate meta_learning config
+    enable_meta_learning = attr.ib(default=False)
 
 
 class Logger:
@@ -197,6 +200,20 @@ class Trainer:
             last_step, eval_section, ", ".join(
             "{} = {}".format(k, v) for k, v in stats.items())))
 
+@attr.s
+class MetaConfig:
+    pass
+
+class MetaTrainer:
+    def __init__(self, logger, config):
+        # TODO
+        self.logger = logger
+        self.meta_learning_config = config.get("meta_learning", "NOT FOUND")
+    def train(self, config, modeldir):
+        # TODO
+        if self.meta_learning_config:
+            self.logger.log(self.meta_learning_config)
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -226,7 +243,11 @@ def main():
     logger.log('Logging to {}'.format(args.logdir))
 
     # Construct trainer and do training
-    trainer = Trainer(logger, config)
+    enable_meta_learning = config.get('train', {}).get('enable_meta_learning')
+    if not enable_meta_learning:
+        trainer = Trainer(logger, config)
+    else:
+        trainer = MetaTrainer(logger, config)
     trainer.train(config, modeldir=args.logdir)
 
 if __name__ == '__main__':
