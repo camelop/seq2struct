@@ -305,7 +305,7 @@ class MetaTrainer:
                 train_data_loaders[key] = self._yield_batches_from_epochs(
                     torch.utils.data.DataLoader(
                         data_within_group,
-                        batch_size=self.train_config.batch_size,
+                        batch_size=self.meta_config.update_batch_size,
                         shuffle=True,
                         drop_last=False, # make sure no one is empty
                         collate_fn=lambda x: x))
@@ -323,26 +323,25 @@ class MetaTrainer:
                 collate_fn=lambda x: x)
 
         # 4. Start training loop 
-        with self.data_random:
-            while last_step < self.train_config.max_steps:  # Quit if too long
+        while last_step < self.train_config.max_steps:  # Quit if too long
 
-                # Evaluate model
-                if last_step % self.train_config.eval_every_n == 0:
-                    if self.train_config.eval_on_train:
-                        self._eval_model(self.logger, self.model, last_step, train_eval_data_loader, 'train', num_eval_items=self.train_config.num_eval_items)
-                    if self.train_config.eval_on_val:
-                        self._eval_model(self.logger, self.model, last_step, val_data_loader, 'val', num_eval_items=self.train_config.num_eval_items)
+            # Evaluate model
+            if last_step % self.train_config.eval_every_n == 0:
+                if self.train_config.eval_on_train:
+                    self._eval_model(self.logger, self.model, last_step, train_eval_data_loader, 'train',num_eval_items=self.train_config.num_eval_items)
+                if self.train_config.eval_on_val:
+                    self._eval_model(self.logger, self.model, last_step, val_data_loader, 'val',num_eval_items=self.train_config.num_eval_items)
 
-                # Compute and apply gradient 
-                metrics = self.meta_step(config, optimizer, train_data_loaders, lr_scheduler, last_step)
+            # Compute and apply gradient 
+            metrics = self.meta_step(config, optimizer, train_data_loaders, lr_scheduler, last_step)
 
-                # Report metrics
-                if last_step % self.train_config.report_every_n == 0:
-                    self.report_metrics(metrics)
-                last_step += 1
-                # Run saver
-                if last_step % self.train_config.save_every_n == 0:
-                    saver.save(modeldir, last_step)
+            # Report metrics
+            if last_step % self.train_config.report_every_n == 0:
+                self.report_metrics(metrics)
+            last_step += 1
+            # Run saver
+            if last_step % self.train_config.save_every_n == 0:
+                saver.save(modeldir, last_step)
 
     def meta_step(self, config, optimizer, train_data_loaders, lr_scheduler, last_step):
         """ 
@@ -374,14 +373,17 @@ class MetaTrainer:
             gradients = []
             for i in range(self.meta_config.meta_batch_size):
                 image = clone_model(self.model)
-                task = self.sample_task()
-                # self.logger.log("Select task -> [{}]".format(task))
-                data_loader = iter(train_data_loaders[task])
+                with self.data_random:
+                    task = self.sample_task()
+                    # self.logger.log("Select task -> [{}]".format(task))
+                    data_loader = iter(train_data_loaders[task])
                 gradient, internal_loss = [], []
                 for j in range(self.meta_config.internal_step): # tune model on task for j times and record the gradients
                     internal_optimizer = torch.optim.SGD(self.model.parameters(), lr=self.meta_config.update_learning_rate)
                     internal_optimizer.zero_grad()
                     batch = next(data_loader)
+                    if len(batch) != self.meta_config.update_batch_size:
+                        self.logger.log("Smaller batch: {}<{}".format(str(len(batch)), self.meta_config.update_batch_size))
                     loss = self.model.compute_loss(batch)
                     internal_loss.append(loss)
                     grads = torch.autograd.grad(loss, self.model.parameters(), allow_unused=True) # no need to do addtional backward

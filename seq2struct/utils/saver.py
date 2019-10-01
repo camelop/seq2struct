@@ -72,7 +72,7 @@ def save_checkpoint(model, optimizer, step, model_dir, ignore=[],
     try:
         os.symlink(actual_checkpoint, path)
     except OSError:
-        shutil.copy2(actual_checkpoint, path)
+        pass  # stupid error here # shutil.copy2(actual_checkpoint, path)
 
     # Cull old checkpoints.
     if keep_every_n is not None:
