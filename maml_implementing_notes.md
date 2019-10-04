@@ -14,10 +14,21 @@ python preprocess.py --config configs/spider-20190205/arxiv-1906.11790v1.jsonnet
 ```
 - Train
 ```
-export CUDA_VISIBLE_DEVICES=7
-rm -rf ./logs/maml-0926-test_meta
-python train.py --config configs/spider-20190205/maml-0926-test_meta.jsonnet --logdir ./logs/maml-0926-test_meta
+export CUDA_VISIBLE_DEVICES=5
+export EXPERIMENT_NAME=maml-0926-test_meta
+rm -rf ./logs/${EXPERIMENT_NAME} && python train.py --config configs/spider-20190205/${EXPERIMENT_NAME}.jsonnet --logdir ./logs/${EXPERIMENT_NAME}
+```
+- infer & eval
+```
+python experiments/spider-20190205/eval_20191003_meta.py  > run.sh
+bash run.sh
 ```
 
 ## debug record
 - drop_last=True may cause next(data_loader) run forever
+- download nltk 
+```
+>>> import nltk
+>>> nltk.download('punkt')
+```
+- copy dataset folder into data/spider-20190205

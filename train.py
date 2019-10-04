@@ -391,7 +391,7 @@ class MetaTrainer:
                     gradient.append(meta_grads)
                     internal_optimizer.step()
                 # compute gradient update for this single task
-                aggregate_internal_gradient = g_average if self.meta_config.internal_skip_first_step else lambda x: g_average(x[1:])
+                aggregate_internal_gradient = g_average if not self.meta_config.internal_skip_first_step else lambda x: g_average(x[1:])
                 metrics['loss'].append(internal_loss)
                 # metrics['gradient'].append(gradient)
                 gradients.append(aggregate_internal_gradient(gradient))
