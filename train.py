@@ -343,7 +343,34 @@ class MetaTrainer:
             if last_step % self.train_config.save_every_n == 0:
                 saver.save(modeldir, last_step)
 
-    def meta_step(self, config, optimizer, train_data_loaders, lr_scheduler, last_step):
+    class GradientTracker:
+        def __init__(self, record_all_gradient=False):
+            self.record_all_gradient = record_all_gradient
+            if record_all_gradient:
+                self.state = []
+            else:
+                self.state = None
+        def append(self, g):
+            if self.record_all_gradient:
+                self.state.append(g)
+            else:
+                if self.state is None:
+                    self.state = g
+                else:
+                    self.state = MetaTrainer.GradientTracker._add(self.state, g)
+        def result(self):
+            if self.record_all_gradient:
+                return MetaTrainer.GradientTracker.g_average(self.state)
+            else:
+                return self.state
+        @staticmethod
+        def _add(g1, g2):
+            return MetaTrainer.GradientTracker.g_average([g1, g2])
+        @staticmethod
+        def g_average(gs): # calc the average of a list of gradient
+            return {k: sum(g[k] for g in gs if g[k] is not None)/len(gs) for k in gs[0].keys()}
+
+    def meta_step(self, config, optimizer, train_data_loaders, lr_scheduler, last_step, record_all_gradient=False):
         """ 
         This is where I should put meta-learning logic.
             Instead of update one batch sampled from all tables. 
@@ -354,30 +381,22 @@ class MetaTrainer:
             update several steps , record grads for each steps.
             Apply these gradients in a way coherent to the meta-learning method
             and still use the lr_scheduler and optimizer to control meta procedure.
-
-            BTW: 
-                Q: Always use SGD as internal optimizor, Why?
-                A: We don't have enough steps for adam to adjust its momentums 
-                    to have better performance, but SGD on the other side is much safer.
-                Q: Restore the state_dict of the model could be a Performance bottleneck, solutions?
-                A: ......Hmmm... No idea for now.
         """
-        def g_average(gs): # calc the average of a list of gradient
-            return {k: sum([g[k] for g in gs if k in g and g[k] is not None])/len(gs) for k in gs[0].keys()}
-            
+        GradientTracker = MetaTrainer.GradientTracker
         metrics = {}
         with self.model_random:
             metrics['loss'] = []
             metrics['last_step'] = last_step
             # metrics['gradient'] = []
-            gradients = []
+            gradients = GradientTracker(record_all_gradient)
             for i in range(self.meta_config.meta_batch_size):
                 image = clone_model(self.model)
                 with self.data_random:
                     task = self.sample_task()
                     # self.logger.log("Select task -> [{}]".format(task))
                     data_loader = iter(train_data_loaders[task])
-                gradient, internal_loss = [], []
+                gradient, internal_loss = GradientTracker(record_all_gradient), []
+                isFirst = True
                 for j in range(self.meta_config.internal_step): # tune model on task for j times and record the gradients
                     internal_optimizer = torch.optim.SGD(self.model.parameters(), lr=self.meta_config.update_learning_rate)
                     internal_optimizer.zero_grad()
@@ -385,19 +404,20 @@ class MetaTrainer:
                     if len(batch) != self.meta_config.update_batch_size:
                         self.logger.log("Smaller batch: {}<{}".format(str(len(batch)), self.meta_config.update_batch_size))
                     loss = self.model.compute_loss(batch)
-                    internal_loss.append(loss)
+                    internal_loss.append(loss.item())
                     grads = torch.autograd.grad(loss, self.model.parameters(), allow_unused=True) # no need to do addtional backward
                     meta_grads = {name:g for ((name, _), g) in zip(self.model.named_parameters(), grads)}
-                    gradient.append(meta_grads)
                     internal_optimizer.step()
+                    if self.meta_config.internal_skip_first_step and isFirst:
+                        isFirst = False
+                    else:
+                        gradient.append(meta_grads)
                 # compute gradient update for this single task
-                aggregate_internal_gradient = g_average if not self.meta_config.internal_skip_first_step else lambda x: g_average(x[1:])
                 metrics['loss'].append(internal_loss)
                 # metrics['gradient'].append(gradient)
-                gradients.append(aggregate_internal_gradient(gradient))
+                gradients.append(gradient.result())
                 recover_model(self.model, image)
-            aggregate_meta_gradient = g_average  # for now
-            all_gradient = aggregate_meta_gradient(gradients)
+            all_gradient = gradients.result()
             optimizer.zero_grad()
             for k, v in self.model.named_parameters():
                 if k in all_gradient and all_gradient[k] is not None:
@@ -416,7 +436,7 @@ class MetaTrainer:
             # We do not have evaluation for the internal updates, then we do not need illustrate that.
             # we can give some statistics about all the gradients & loss.
         """
-        loss = [str(list(map(lambda x: "{:.2f}".format(x.item()), l))) for l in metrics["loss"]]
+        loss = [str(list(map(lambda x: "{:.2f}".format(x), l))) for l in metrics["loss"]]
         self.logger.log('Step {}: Loss - {}'.format(metrics["last_step"], ",".join(loss)))
         # self.logger.log('Gradient:')
         # self.logger.log(pprint.pformat(metrics['gradient']))

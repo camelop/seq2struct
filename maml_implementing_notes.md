@@ -14,8 +14,8 @@ python preprocess.py --config configs/spider-20190205/arxiv-1906.11790v1.jsonnet
 ```
 - Train
 ```
-export CUDA_VISIBLE_DEVICES=5
-export EXPERIMENT_NAME=maml-0926-test_meta
+export CUDA_VISIBLE_DEVICES=6
+export EXPERIMENT_NAME=maml-1010-test_more_grad
 rm -rf ./logs/${EXPERIMENT_NAME} && python train.py --config configs/spider-20190205/${EXPERIMENT_NAME}.jsonnet --logdir ./logs/${EXPERIMENT_NAME}
 ```
 - infer & eval
