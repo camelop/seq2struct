@@ -30,7 +30,7 @@
         internal_skip_first_step: true, # true for maml, false for default reptile
 
         meta_batch_size: 4, # aka "sampled task number per meta update", 1 for default reptile  
-        update_batch_size: 32, # should be less than the instance number of the smallest task / or just use what we have
+        update_batch_size: 16, # should be less than the instance number of the smallest task / or just use what we have
         update_learning_rate: 1e-4, # the learning rate for internal update
         sample_task_distribution: "equal", # or "by_instance_num"
 

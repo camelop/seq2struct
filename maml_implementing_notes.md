@@ -14,13 +14,13 @@ python preprocess.py --config configs/spider-20190205/arxiv-1906.11790v1.jsonnet
 ```
 - Train
 ```
-export CUDA_VISIBLE_DEVICES=6
+export CUDA_VISIBLE_DEVICES=2
 export EXPERIMENT_NAME=maml-1010-test_more_grad
 rm -rf ./logs/${EXPERIMENT_NAME} && python train.py --config configs/spider-20190205/${EXPERIMENT_NAME}.jsonnet --logdir ./logs/${EXPERIMENT_NAME}
 ```
 - infer & eval
 ```
-python experiments/spider-20190205/eval_20191003_meta.py  > run.sh
+python experiments/spider-20190205/eval_20191010.py  > run.sh
 bash run.sh
 ```
 

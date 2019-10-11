@@ -219,7 +219,7 @@ class MetaConfig:
     ft_learning_rate = attr.ib(default=1e-4)
 
 
-def clone_model(model):
+def clone_model(model):  # Thinking about making this pair of functions a with statement
     state_dict = model.state_dict()
     image = {}
     for key, value in state_dict.items():
@@ -289,6 +289,11 @@ class MetaTrainer:
             grouped_train_data = {}
             if config["data"]["train"]["name"] == "spider":
                 get_train_group_key = lambda x: x[0].get("db_id", "no_group")
+                """
+                xliu: I considered about getting this to datasets.spider.SpiderDataset but it seems that
+                    I still need to figure out what kind of dataset am I using here from the configurations
+                    or I'll need registry to instantiate (registry.construct) 'dataset', 'spider'
+                """
             else:
                 raise NotImplementedError("No get_group_key method for {}".format(config["data"]["train"]["name"]))
             for data in train_data:

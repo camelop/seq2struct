@@ -19,14 +19,26 @@ from seq2struct import optimizers
 from seq2struct.utils import registry
 from seq2struct.utils import saver as saver_mod
 
+from train import clone_model, recover_model
+
 class Inferer:
-    def __init__(self, config):
+    def __init__(self, config, force_no_ft=False):
         self.config = config
         if torch.cuda.is_available():
             self.device = torch.device('cuda')
         else:
             self.device = torch.device('cpu')
             torch.set_num_threads(1)
+
+        self.meta = self.config.get("meta_learning")
+        self.use_ft = False
+        if self.meta and self.meta.get("enable_ft_evaluation") and not force_no_ft:
+            self.use_ft = True
+            print("Using fine-tune for meta_learning inference")
+            self.ft_batch_size = self.meta.get("ft_batch_size", 32)
+            self.ft_learning_rate = self.meta.get("ft_learning_rate", 1e-4)
+            self.ft_max_epoch = self.meta.get("ft_max_epoch", 8)
+            self.ft_use_support_with_same_query = self.meta.get("ft_use_support_with_same_query", False)
 
         # 0. Construct preprocessors
         self.model_preproc = registry.instantiate(
@@ -52,6 +64,8 @@ class Inferer:
         return model
 
     def infer(self, model, output_path, args):
+        if self.use_ft:
+            return self.ft_infer(model, output_path, args)
         # 3. Get training data somewhere
         output = open(output_path, 'w')
         data = registry.construct('dataset', self.config['data'][args.section])
@@ -89,10 +103,34 @@ class Inferer:
                     sliced_data = data
                 self._visualize_attention(model, args.beam_size, args.output_history, sliced_data, args.res1, args.res2, args.res3, output)
 
+    def ft_infer(self, model, output_path, args):
+        outputs = [open("{}.ft{}".format(output_path, str(i)), 'w') for i in range(self.ft_max_epoch)]
+        data = registry.construct('dataset', self.config['data'][args.section])
+        if args.limit:
+            sliced_data = itertools.islice(data, args.limit)
+        else:
+            sliced_data = data
+        # use grad because we need the fine-tunning
+        if args.mode == 'infer':
+            orig_data = registry.construct('dataset', self.config['data'][args.section])
+            preproc_data = self.model_preproc.dataset(args.section)
+            if args.limit:
+                sliced_orig_data = itertools.islice(data, args.limit)
+                sliced_preproc_data = itertools.islice(data, args.limit)
+            else:
+                sliced_orig_data = orig_data
+                sliced_preproc_data = preproc_data
+            assert len(orig_data) == len(preproc_data)
+            self._inner_infer(model, args.beam_size, args.output_history, sliced_orig_data, sliced_preproc_data, outputs, args.nproc)
+        elif args.mode == 'debug' or args.mode == 'visualize_attention' or True:
+            raise NotImplementedError("Mode {} not implemented for fine-tune eval for now.".format(args.mode))
+            
+
     def _inner_infer(self, model, beam_size, output_history, sliced_orig_data, sliced_preproc_data, output, nproc):
         list_items = list(enumerate(zip(sliced_orig_data, sliced_preproc_data)))
         total = len(sliced_orig_data)
-
+        if self.use_ft:
+            self._prepare_support_for_example_index(list_items)
         params = []
         pbar = (MultiProcessTqdm if nproc > 1 else tqdm.tqdm)(total=total, smoothing=0, dynamic_ncols=True)
         for chunk in chunked(list_items, total // (nproc * 3)):
@@ -105,14 +143,66 @@ class Inferer:
         else:
             res = (infer_result for param in params for infer_result in self._infer_batch(*param))
 
-        for item in res:
-            output.write(item)
-            output.flush()
+        if self.use_ft:
+            for items in res:
+                for i, item in enumerate(items):
+                    output[i].write(item)
+                    output[i].flush()  # xliu: why in inner loop
+        else:
+            for item in res:
+                output.write(item)
+                output.flush()  # xliu: why in inner loop
 
         pbar.close()
 
+    def _prepare_support_for_example_index(self, triples):
+        self.ft_support_batches = []
+        if self.config["data"]["train"]["name"] == "spider":
+            get_train_group_key = lambda x: x[0].get("db_id", "no_group")
+            get_oi_query = lambda x: x.orig.get("query")
+        else:
+            raise NotImplementedError("Fine-tune eval for dataset except Spider is not implemented yet.")
+        grouped = {}
+        for (idx, (oi, pi)) in triples:
+            key = get_train_group_key(pi)
+            if key in grouped:
+                grouped[key].append((idx, (oi, pi)))
+            else:
+                grouped[key] = [(idx, (oi, pi))]
+        for (idx, (oi, pi)) in triples:
+            key = get_train_group_key(pi)
+            query = get_oi_query(oi)
+            supports = []
+            for (jdx, (oj, pj)) in grouped[key]:
+                if get_oi_query(oj) == query and not self.ft_use_support_with_same_query:
+                    continue
+                supports.append(pj)
+            if self.ft_batch_size:  # one by one by default
+                supports = [supports[i: min(i+self.ft_batch_size, len(supports))] for i in range(0, len(supports), self.ft_batch_size)]
+            self.ft_support_batches.append(supports)
+
     def _infer_batch(self, model, beam_size, output_history, triples, pbar):
-        return [self._infer_single(model, beam_size, output_history, idx, oi, pi, pbar) for (idx, (oi, pi)) in triples]
+        if self.use_ft:
+            def meaningless():
+                pass
+            ret = []
+            for (idx, (oi, pi)) in triples:
+                image = clone_model(model)
+                internal_optimizer = torch.optim.SGD(model.parameters(), lr=self.ft_learning_rate)
+                results = [self._infer_single(model, beam_size, output_history, idx, oi, pi, pbar)]  # eval before ft
+                for e in range(self.ft_max_epoch - 1):
+                    for batch in self.ft_support_batches[idx]:
+                        internal_optimizer.zero_grad()
+                        loss = model.compute_loss(batch)
+                        loss.backward()
+                        internal_optimizer.step()
+                    result = self._infer_single(model, beam_size, output_history, idx, oi, pi, meaningless)
+                    results.append(result)
+                recover_model(model, image)
+                ret.append(results)
+            return ret
+        else:
+            return [self._infer_single(model, beam_size, output_history, idx, oi, pi, pbar) for (idx, (oi, pi)) in triples]
 
     def _infer_single(self, model, beam_size, output_history, index, orig_item, preproc_item, pbar):
         try:
@@ -248,12 +338,13 @@ def main():
     parser.add_argument('--output', required=True)
     parser.add_argument('--beam-size', required=True, type=int)
     parser.add_argument('--output-history', action='store_true')
-    parser.add_argument('--limit', type=int)
+    parser.add_argument('--limit', type=int)  # this option is broken
     parser.add_argument('--mode', default='infer', choices=['infer', 'debug', 'visualize_attention'])
     parser.add_argument('--res1', default='outputs/glove-sup-att-1h-0/outputs.json')
     parser.add_argument('--res2', default='outputs/glove-sup-att-1h-1/outputs.json')
     parser.add_argument('--res3', default='outputs/glove-sup-att-1h-2/outputs.json')
     parser.add_argument('--nproc', type=int, default=1)
+    parser.add_argument('--force-no-ft', action='store_true')
     args = parser.parse_args()
 
     if args.config_args:
@@ -269,7 +360,7 @@ def main():
         print('Output file {} already exists'.format(output_path))
         sys.exit(1)
 
-    inferer = Inferer(config)
+    inferer = Inferer(config, args.force_no_ft)
     model = inferer.load_model(args.logdir, args.step)
     inferer.infer(model, output_path, args)
 
