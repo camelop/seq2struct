@@ -228,8 +228,7 @@ def clone_model(model):  # Thinking about making this pair of functions a with s
 
 
 def recover_model(model, image):
-    for key in model.state_dict().keys():
-        model.state_dict()[key] = image[key]
+    model.load_state_dict(image)
 
     
 class MetaTrainer:

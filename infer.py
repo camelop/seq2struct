@@ -188,15 +188,24 @@ class Inferer:
             ret = []
             for (idx, (oi, pi)) in triples:
                 image = clone_model(model)
-                internal_optimizer = torch.optim.SGD(model.parameters(), lr=self.ft_learning_rate)
+                with torch.no_grad():
+                    internal_optimizer = torch.optim.SGD(model.parameters(), lr=self.ft_learning_rate)
                 results = [self._infer_single(model, beam_size, output_history, idx, oi, pi, pbar)]  # eval before ft
                 for e in range(self.ft_max_epoch - 1):
-                    for batch in self.ft_support_batches[idx]:
-                        internal_optimizer.zero_grad()
-                        loss = model.compute_loss(batch)
-                        loss.backward()
-                        internal_optimizer.step()
-                    result = self._infer_single(model, beam_size, output_history, idx, oi, pi, meaningless)
+                    try:
+                        for batch in self.ft_support_batches[idx]:
+                            internal_optimizer.zero_grad()
+                            loss = model.compute_loss(batch)
+                            loss.backward()
+                            internal_optimizer.step()                
+                        with torch.no_grad():
+                            result = self._infer_single(model, beam_size, output_history, idx, oi, pi, meaningless)
+                    except Exception as e:
+                        _result = {
+                            'index': idx,
+                            'error': str(e),
+                        }
+                        result = json.dumps(_result) + '\n'
                     results.append(result)
                 recover_model(model, image)
                 ret.append(results)

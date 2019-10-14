@@ -129,3 +129,5 @@ third_party/stanford-corenlp-full-2018-10-05/
 logdirs/
 pt-exps/
 logs/
+run.sh
+temp_run.sh
