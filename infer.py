@@ -4,6 +4,8 @@ import itertools
 import json
 import os
 import sys
+import logging
+import traceback
 
 import _jsonnet
 import asdl
@@ -21,6 +23,28 @@ from seq2struct.utils import saver as saver_mod
 
 from train import clone_model, recover_model
 
+def get_file_logger(name):
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    # create file handler which logs even debug messages
+    if not os.path.exists("debug"):
+        os.makedirs("debug")
+    fh = logging.FileHandler(os.path.join("debug", "{}.log".format(name)))
+    fh.setLevel(logging.DEBUG)
+    # create console handler with a higher log level
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    # create formatter and add it to the handlers
+    formatter = logging.Formatter('%(message)s')
+    fh.setFormatter(formatter)
+    ch.setFormatter(formatter)
+    # add the handlers to the logger
+    logger.addHandler(fh)
+    logger.addHandler(ch)
+    return logger
+debug_infer_logger = get_file_logger("infer")
+debug_train_logger = get_file_logger("train")
+
 class Inferer:
     def __init__(self, config, force_no_ft=False):
         self.config = config
@@ -36,7 +60,7 @@ class Inferer:
             self.use_ft = True
             print("Using fine-tune for meta_learning inference")
             self.ft_batch_size = self.meta.get("ft_batch_size", 32)
-            self.ft_learning_rate = self.meta.get("ft_learning_rate", 1e-4)
+            self.ft_learning_rate = self.meta.get("ft_learning_rate", 1e-2)
             self.ft_max_epoch = self.meta.get("ft_max_epoch", 8)
             self.ft_use_support_with_same_query = self.meta.get("ft_use_support_with_same_query", False)
 
@@ -201,6 +225,8 @@ class Inferer:
                         with torch.no_grad():
                             result = self._infer_single(model, beam_size, output_history, idx, oi, pi, meaningless)
                     except Exception as e:
+                        debug_train_logger.error("")
+                        debug_train_logger.error(traceback.format_exc())
                         _result = {
                             'index': idx,
                             'error': str(e),
@@ -236,6 +262,8 @@ class Inferer:
                 'beams': decoded,
             }
         except Exception as e:
+            debug_infer_logger.error("")
+            debug_infer_logger.error(traceback.format_exc())
             result = {
                 'index': index,
                 'error': str(e),
@@ -365,11 +393,11 @@ def main():
         args.logdir = os.path.join(args.logdir, config['model_name'])
 
     output_path = args.output.replace('__LOGDIR__', args.logdir)
-    if os.path.exists(output_path):
-        print('Output file {} already exists'.format(output_path))
-        sys.exit(1)
 
     inferer = Inferer(config, args.force_no_ft)
+    if os.path.exists(output_path) and not inferer.use_ft:
+        print('Output file {} already exists'.format(output_path))
+        sys.exit(1)
     model = inferer.load_model(args.logdir, args.step)
     inferer.infer(model, output_path, args)
 

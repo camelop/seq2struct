@@ -1,6 +1,6 @@
 from scanner import scan
 
-def track(base_dir="logs", max_ft=None):
+def track(base_dir="logs", max_ft=32):
     ckps, ifrs, evls = scan(base_dir)
     ckp_path = {}
     ckp_evl = {}
@@ -12,9 +12,13 @@ def track(base_dir="logs", max_ft=None):
         ckp_evl[ckp] = [(None, None)] * max_ft
     for exp_name, step, ft_num, path in ifrs:
         ckp = (exp_name, step)
+        if ckp not in ckp_evl:
+            continue
         ckp_evl[ckp][ft_num] = (path, None)
     for exp_name, step, ft_num, path in evls:
         ckp = (exp_name, step)
+        if ckp not in ckp_evl:
+            continue
         ckp_evl[ckp][ft_num] = (ckp_evl[ckp][ft_num][0], path)
     return ckp_path, ckp_evl
 

@@ -35,3 +35,16 @@ bash temp_run.sh
 >>> nltk.download('punkt')
 ```
 - copy dataset folder into data/spider-20190205
+
+- Debug emtpy beam
+
+    - step number not enough?
+        - print it out:
+            usually it takes less than 100 (even 50) steps to find a correct beam.
+
+```
+rm -f logs/meta-1014-maml/infer-val-step00002100-bs1.jsonl && python infer.py --config logs/meta-1014-maml/config-20191014T184903.json --logdir logs/meta-1014-maml --output logs/meta-1014-maml/infer-val-step00002100-bs1.jsonl --step 2100 --section val --beam-size 1 --force-no-ft
+```
+```
+python eval.py --config logs/meta-1014-maml/config-20191014T184903.json --logdir logs/meta-1014-maml --inferred logs/meta-1014-maml/infer-val-step00002100-bs1.jsonl --output logs/meta-1014-maml/eval-val-step00002100-bs1.jsonl --section val
+```

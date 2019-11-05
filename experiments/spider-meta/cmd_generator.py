@@ -2,16 +2,14 @@ import os, glob
 import sys
 from tracker import track
 
-
-
-
 def get_checkpoint_config_path(ckp_path):
     ckp_dir, ckp_name = os.path.split(ckp_path)
     config_path = glob.glob(os.path.join(ckp_dir, "*config-*.json"))
     if len(config_path) < 1:
         raise FileNotFoundError("Config file not found for checkpoint: {}".format(ckp_path))
     if len(config_path) > 1:
-        raise FileExistsError("Multiple config file for checkpoint: {}".format(ckp_path))
+        # raise FileNotFoundError("Multiple config file for checkpoint: {}".format(ckp_path))
+        print("# Warning: Multiple config file for checkpoint: {}".format(ckp_path), file=sys.stderr)
     return config_path[0]
 
 def generate_infer_command(base_dir="logs", use_force_no_ft=True):

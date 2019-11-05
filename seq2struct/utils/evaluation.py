@@ -33,7 +33,7 @@ def compute_metrics(config_path, config_args, section, inferred_path,logdir=None
             inferred_code = infer_results['beams'][0]['inferred_code']
         else:
             inferred_code = None
-            assert 'error' in infer_results
+            # assert 'error' in infer_results
         if 'index' in infer_results:
             metrics.add(data[infer_results['index']], inferred_code)
         else:
